@@ -12,26 +12,4 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import type { Message } from "../types.js";
-import type { DescFile } from "../descriptors.js";
-import type { GenExtension } from "./types.js";
-
-/**
- * Hydrate an extension descriptor.
- *
- * @private
- */
-export function extDesc<Extendee extends Message, Value>(
-  file: DescFile,
-  path: number,
-  ...paths: number[]
-): GenExtension<Extendee, Value> {
-  if (paths.length == 0) {
-    return file.extensions[path] as GenExtension<Extendee, Value>;
-  }
-  const e = paths.pop() as number; // we checked length above
-  return paths.reduce(
-    (acc, cur) => acc.nestedMessages[cur],
-    file.messages[path],
-  ).nestedExtensions[e] as GenExtension<Extendee, Value>;
-}
+export { extDesc } from "../codegenv2/extension.js";
