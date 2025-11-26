@@ -92,8 +92,8 @@ export function base64Encode(
 ) {
   const table = getEncodeTable(encoding);
   const pad = encoding == "std";
-  let base64 = "",
-    groupPos = 0, // position in base64 group
+  const result: string[] = [];
+  let groupPos = 0, // position in base64 group
     b: number, // current byte
     p = 0; // carry over from previous byte
 
@@ -101,18 +101,17 @@ export function base64Encode(
     b = bytes[i];
     switch (groupPos) {
       case 0:
-        base64 += table[b >> 2];
+        result.push(table[b >> 2]);
         p = (b & 3) << 4;
         groupPos = 1;
         break;
       case 1:
-        base64 += table[p | (b >> 4)];
+        result.push(table[p | (b >> 4)]);
         p = (b & 15) << 2;
         groupPos = 2;
         break;
       case 2:
-        base64 += table[p | (b >> 6)];
-        base64 += table[b & 63];
+        result.push(table[p | (b >> 6)], table[b & 63]);
         groupPos = 0;
         break;
     }
@@ -120,14 +119,14 @@ export function base64Encode(
 
   // add output padding
   if (groupPos) {
-    base64 += table[p];
+    result.push(table[p]);
     if (pad) {
-      base64 += "=";
-      if (groupPos == 1) base64 += "=";
+      result.push("=");
+      if (groupPos == 1) result.push("=");
     }
   }
 
-  return base64;
+  return result.join("");
 }
 
 // lookup table from base64 character to byte
