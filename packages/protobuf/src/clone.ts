@@ -28,36 +28,36 @@ export function clone<Desc extends DescMessage>(
   return cloneReflect(reflect(schema, message)).message as MessageShape<Desc>;
 }
 
-function cloneReflect(i: ReflectMessage): ReflectMessage {
-  const o = reflect(i.desc);
-  for (const f of i.fields) {
-    if (!i.isSet(f)) {
+function cloneReflect(sourceMessage: ReflectMessage): ReflectMessage {
+  const clonedMessage = reflect(sourceMessage.desc);
+  for (const field of sourceMessage.fields) {
+    if (!sourceMessage.isSet(field)) {
       continue;
     }
-    switch (f.fieldKind) {
+    switch (field.fieldKind) {
       case "list":
-        const list = o.get(f);
-        for (const item of i.get(f)) {
-          list.add(cloneSingular(f, item));
+        const list = clonedMessage.get(field);
+        for (const item of sourceMessage.get(field)) {
+          list.add(cloneSingular(field, item));
         }
         break;
       case "map":
-        const map = o.get(f);
-        for (const entry of i.get(f).entries()) {
-          map.set(entry[0], cloneSingular(f, entry[1]));
+        const map = clonedMessage.get(field);
+        for (const entry of sourceMessage.get(field).entries()) {
+          map.set(entry[0], cloneSingular(field, entry[1]));
         }
         break;
       default: {
-        o.set(f, cloneSingular(f, i.get(f)));
+        clonedMessage.set(field, cloneSingular(field, sourceMessage.get(field)));
         break;
       }
     }
   }
-  const unknown = i.getUnknown();
-  if (unknown && unknown.length > 0) {
-    o.setUnknown([...unknown]);
+  const unknownFields = sourceMessage.getUnknown();
+  if (unknownFields && unknownFields.length > 0) {
+    clonedMessage.setUnknown([...unknownFields]);
   }
-  return o;
+  return clonedMessage;
 }
 
 function cloneSingular<T>(field: DescField, value: T): T {
