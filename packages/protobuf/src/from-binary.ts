@@ -152,21 +152,23 @@ export function readField(
       message.set(field, readScalar(reader, field.scalar));
       break;
     case "enum":
-      const val = readScalar(reader, ScalarType.INT32);
+      const enumValue = readScalar(reader, ScalarType.INT32);
       if (field.enum.open) {
-        message.set(field, val);
+        message.set(field, enumValue);
       } else {
-        const ok = field.enum.values.some((v) => v.number === val);
-        if (ok) {
-          message.set(field, val);
+        const isValidEnumValue = field.enum.values.some(
+          (enumVal) => enumVal.number === enumValue,
+        );
+        if (isValidEnumValue) {
+          message.set(field, enumValue);
         } else if (options.readUnknownFields) {
-          const bytes: number[] = [];
-          varint32write(val as number, bytes);
+          const encodedBytes: number[] = [];
+          varint32write(enumValue as number, encodedBytes);
           const unknownFields = message.getUnknown() ?? [];
           unknownFields.push({
             no: field.number,
             wireType,
-            data: new Uint8Array(bytes),
+            data: new Uint8Array(encodedBytes),
           });
           message.setUnknown(unknownFields);
         }
@@ -253,16 +255,16 @@ function readListField(
     return;
   }
   const scalarType = field.scalar ?? ScalarType.INT32;
-  const packed =
+  const isPacked =
     wireType == WireType.LengthDelimited &&
     scalarType != ScalarType.STRING &&
     scalarType != ScalarType.BYTES;
-  if (!packed) {
+  if (!isPacked) {
     list.add(readScalar(reader, scalarType));
     return;
   }
-  const e = reader.uint32() + reader.pos;
-  while (reader.pos < e) {
+  const endPosition = reader.uint32() + reader.pos;
+  while (reader.pos < endPosition) {
     list.add(readScalar(reader, scalarType));
   }
 }

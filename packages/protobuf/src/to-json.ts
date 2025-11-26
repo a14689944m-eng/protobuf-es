@@ -181,39 +181,44 @@ export function enumToJson<Desc extends DescEnum>(
   return name as EnumJsonType<Desc>;
 }
 
-function reflectToJson(msg: ReflectMessage, opts: JsonWriteOptions): JsonValue {
-  const wktJson = tryWktToJson(msg, opts);
+function reflectToJson(
+  message: ReflectMessage,
+  options: JsonWriteOptions,
+): JsonValue {
+  const wktJson = tryWktToJson(message, options);
   if (wktJson !== undefined) return wktJson;
   const json: JsonObject = {};
-  for (const f of msg.sortedFields) {
-    if (!msg.isSet(f)) {
-      if (f.presence == LEGACY_REQUIRED) {
-        throw new Error(`cannot encode ${f} to JSON: required field not set`);
+  for (const field of message.sortedFields) {
+    if (!message.isSet(field)) {
+      if (field.presence == LEGACY_REQUIRED) {
+        throw new Error(
+          `cannot encode ${field} to JSON: required field not set`,
+        );
       }
-      if (!opts.alwaysEmitImplicit || f.presence !== IMPLICIT) {
+      if (!options.alwaysEmitImplicit || field.presence !== IMPLICIT) {
         // Fields with implicit presence omit zero values (e.g. empty string) by default
         continue;
       }
     }
-    const jsonValue = fieldToJson(f, msg.get(f), opts);
+    const jsonValue = fieldToJson(field, message.get(field), options);
     if (jsonValue !== undefined) {
-      json[jsonName(f, opts)] = jsonValue;
+      json[jsonName(field, options)] = jsonValue;
     }
   }
-  if (opts.registry) {
-    const tagSeen = new Set<number>();
-    for (const { no } of msg.getUnknown() ?? []) {
+  if (options.registry) {
+    const processedFieldNumbers = new Set<number>();
+    for (const { no } of message.getUnknown() ?? []) {
       // Same tag can appear multiple times, so we
       // keep track and skip identical ones.
-      if (!tagSeen.has(no)) {
-        tagSeen.add(no);
-        const extension = opts.registry.getExtensionFor(msg.desc, no);
+      if (!processedFieldNumbers.has(no)) {
+        processedFieldNumbers.add(no);
+        const extension = options.registry.getExtensionFor(message.desc, no);
         if (!extension) {
           continue;
         }
-        const value = getExtension(msg.message, extension);
+        const value = getExtension(message.message, extension);
         const [container, field] = createExtensionContainer(extension, value);
-        const jsonValue = fieldToJson(field, container.get(field), opts);
+        const jsonValue = fieldToJson(field, container.get(field), options);
         if (jsonValue !== undefined) {
           json[extension.jsonName] = jsonValue;
         }
@@ -223,94 +228,102 @@ function reflectToJson(msg: ReflectMessage, opts: JsonWriteOptions): JsonValue {
   return json;
 }
 
-function fieldToJson(f: DescField, val: unknown, opts: JsonWriteOptions) {
-  switch (f.fieldKind) {
+function fieldToJson(
+  field: DescField,
+  value: unknown,
+  options: JsonWriteOptions,
+) {
+  switch (field.fieldKind) {
     case "scalar":
-      return scalarToJson(f, val);
+      return scalarToJson(field, value);
     case "message":
-      return reflectToJson(val as ReflectMessage, opts);
+      return reflectToJson(value as ReflectMessage, options);
     case "enum":
-      return enumToJsonInternal(f.enum, val, opts.enumAsInteger);
+      return enumToJsonInternal(field.enum, value, options.enumAsInteger);
     case "list":
-      return listToJson(val as ReflectList, opts);
+      return listToJson(value as ReflectList, options);
     case "map":
-      return mapToJson(val as ReflectMap, opts);
+      return mapToJson(value as ReflectMap, options);
   }
 }
 
-function mapToJson(map: ReflectMap, opts: JsonWriteOptions) {
-  const f = map.field();
-  const jsonObj: JsonObject = {};
-  switch (f.mapKind) {
+function mapToJson(map: ReflectMap, options: JsonWriteOptions) {
+  const field = map.field();
+  const jsonObject: JsonObject = {};
+  switch (field.mapKind) {
     case "scalar":
       for (const [entryKey, entryValue] of map) {
-        jsonObj[entryKey as keyof object] = scalarToJson(f, entryValue);
+        jsonObject[entryKey as keyof object] = scalarToJson(field, entryValue);
       }
       break;
     case "message":
       for (const [entryKey, entryValue] of map) {
-        jsonObj[entryKey as keyof object] = reflectToJson(
+        jsonObject[entryKey as keyof object] = reflectToJson(
           entryValue as ReflectMessage,
-          opts,
+          options,
         );
       }
       break;
     case "enum":
       for (const [entryKey, entryValue] of map) {
-        jsonObj[entryKey as keyof object] = enumToJsonInternal(
-          f.enum,
+        jsonObject[entryKey as keyof object] = enumToJsonInternal(
+          field.enum,
           entryValue,
-          opts.enumAsInteger,
+          options.enumAsInteger,
         );
       }
       break;
   }
-  return opts.alwaysEmitImplicit || map.size > 0 ? jsonObj : undefined;
+  return options.alwaysEmitImplicit || map.size > 0 ? jsonObject : undefined;
 }
 
-function listToJson(list: ReflectList, opts: JsonWriteOptions) {
-  const f = list.field();
-  const jsonArr: JsonValue[] = [];
-  switch (f.listKind) {
+function listToJson(list: ReflectList, options: JsonWriteOptions) {
+  const field = list.field();
+  const jsonArray: JsonValue[] = [];
+  switch (field.listKind) {
     case "scalar":
       for (const item of list) {
-        jsonArr.push(scalarToJson(f, item) as JsonValue);
+        jsonArray.push(scalarToJson(field, item) as JsonValue);
       }
       break;
     case "enum":
       for (const item of list) {
-        jsonArr.push(
-          enumToJsonInternal(f.enum, item, opts.enumAsInteger) as JsonValue,
+        jsonArray.push(
+          enumToJsonInternal(field.enum, item, options.enumAsInteger) as JsonValue,
         );
       }
       break;
     case "message":
       for (const item of list) {
-        jsonArr.push(reflectToJson(item as ReflectMessage, opts));
+        jsonArray.push(reflectToJson(item as ReflectMessage, options));
       }
       break;
   }
-  return opts.alwaysEmitImplicit || jsonArr.length > 0 ? jsonArr : undefined;
+  return options.alwaysEmitImplicit || jsonArray.length > 0
+    ? jsonArray
+    : undefined;
 }
 
 function enumToJsonInternal(
-  desc: DescEnum,
+  enumDescriptor: DescEnum,
   value: unknown,
   enumAsInteger: boolean,
 ): string | number | null {
   if (typeof value != "number") {
     throw new Error(
-      `cannot encode ${desc} to JSON: expected number, got ${formatVal(value)}`,
+      `cannot encode ${enumDescriptor} to JSON: expected number, got ${formatVal(value)}`,
     );
   }
-  if (desc.typeName == "google.protobuf.NullValue") {
+  if (enumDescriptor.typeName == "google.protobuf.NullValue") {
     return null;
   }
   if (enumAsInteger) {
     return value;
   }
-  const val = desc.value[value] as DescEnumValue | undefined;
-  return val?.name ?? value; // if we don't know the enum value, just return the number
+  const enumValueDescriptor = enumDescriptor.value[value] as
+    | DescEnumValue
+    | undefined;
+  return enumValueDescriptor?.name ?? value; // if we don't know the enum value, just return the number
 }
 
 function scalarToJson(
@@ -388,87 +401,87 @@ function scalarToJson(
   }
 }
 
-function jsonName(f: DescField, opts: JsonWriteOptions) {
-  return opts.useProtoFieldName ? f.name : f.jsonName;
+function jsonName(field: DescField, options: JsonWriteOptions) {
+  return options.useProtoFieldName ? field.name : field.jsonName;
 }
 
 // returns a json value if wkt, otherwise returns undefined.
 function tryWktToJson(
-  msg: ReflectMessage,
-  opts: JsonWriteOptions,
+  message: ReflectMessage,
+  options: JsonWriteOptions,
 ): JsonValue | undefined {
-  if (!msg.desc.typeName.startsWith("google.protobuf.")) {
+  if (!message.desc.typeName.startsWith("google.protobuf.")) {
     return undefined;
   }
-  switch (msg.desc.typeName) {
+  switch (message.desc.typeName) {
     case "google.protobuf.Any":
-      return anyToJson(msg.message as Any, opts);
+      return anyToJson(message.message as Any, options);
     case "google.protobuf.Timestamp":
-      return timestampToJson(msg.message as Timestamp);
+      return timestampToJson(message.message as Timestamp);
     case "google.protobuf.Duration":
-      return durationToJson(msg.message as Duration);
+      return durationToJson(message.message as Duration);
     case "google.protobuf.FieldMask":
-      return fieldMaskToJson(msg.message as FieldMask);
+      return fieldMaskToJson(message.message as FieldMask);
     case "google.protobuf.Struct":
-      return structToJson(msg.message as Struct);
+      return structToJson(message.message as Struct);
     case "google.protobuf.Value":
-      return valueToJson(msg.message as Value);
+      return valueToJson(message.message as Value);
     case "google.protobuf.ListValue":
-      return listValueToJson(msg.message as ListValue);
+      return listValueToJson(message.message as ListValue);
     default:
-      if (isWrapperDesc(msg.desc)) {
-        const valueField = msg.desc.fields[0];
-        return scalarToJson(valueField, msg.get(valueField));
+      if (isWrapperDesc(message.desc)) {
+        const valueField = message.desc.fields[0];
+        return scalarToJson(valueField, message.get(valueField));
       }
       return undefined;
   }
 }
 
-function anyToJson(val: Any, opts: JsonWriteOptions): JsonValue {
-  if (val.typeUrl === "") {
+function anyToJson(anyValue: Any, options: JsonWriteOptions): JsonValue {
+  if (anyValue.typeUrl === "") {
     return {};
   }
-  const { registry } = opts;
-  let message: Message | undefined;
-  let desc: DescMessage | undefined;
+  const { registry } = options;
+  let unpackedMessage: Message | undefined;
+  let messageDescriptor: DescMessage | undefined;
   if (registry) {
-    message = anyUnpack(val, registry);
-    if (message) {
-      desc = registry.getMessage(message.$typeName);
+    unpackedMessage = anyUnpack(anyValue, registry);
+    if (unpackedMessage) {
+      messageDescriptor = registry.getMessage(unpackedMessage.$typeName);
     }
   }
-  if (!desc || !message) {
+  if (!messageDescriptor || !unpackedMessage) {
     throw new Error(
-      `cannot encode message ${val.$typeName} to JSON: "${val.typeUrl}" is not in the type registry`,
+      `cannot encode message ${anyValue.$typeName} to JSON: "${anyValue.typeUrl}" is not in the type registry`,
     );
   }
-  let json = reflectToJson(reflect(desc, message), opts);
+  let json = reflectToJson(reflect(messageDescriptor, unpackedMessage), options);
   if (
-    desc.typeName.startsWith("google.protobuf.") ||
+    messageDescriptor.typeName.startsWith("google.protobuf.") ||
     json === null ||
     Array.isArray(json) ||
     typeof json !== "object"
   ) {
     json = { value: json };
   }
-  json["@type"] = val.typeUrl;
+  json["@type"] = anyValue.typeUrl;
   return json;
 }
 
-function durationToJson(val: Duration) {
-  const seconds = Number(val.seconds);
-  const nanos = val.nanos;
+function durationToJson(duration: Duration) {
+  const seconds = Number(duration.seconds);
+  const nanos = duration.nanos;
   if (seconds > 315576000000 || seconds < -315576000000) {
     throw new Error(
-      `cannot encode message ${val.$typeName} to JSON: value out of range`,
+      `cannot encode message ${duration.$typeName} to JSON: value out of range`,
     );
   }
   if ((seconds > 0 && nanos < 0) || (seconds < 0 && nanos > 0)) {
     throw new Error(
-      `cannot encode message ${val.$typeName} to JSON: nanos sign must match seconds sign`,
+      `cannot encode message ${duration.$typeName} to JSON: nanos sign must match seconds sign`,
     );
   }
-  let text = val.seconds.toString();
+  let text = duration.seconds.toString();
   if (nanos !== 0) {
     let nanosStr = Math.abs(nanos).toString();
     nanosStr = "0".repeat(9 - nanosStr.length) + nanosStr;
@@ -485,85 +498,85 @@ function durationToJson(val: Duration) {
   return text + "s";
 }
 
-function fieldMaskToJson(val: FieldMask) {
-  return val.paths
-    .map((p) => {
-      if (p.match(/_[0-9]?_/g) || p.match(/[A-Z]/g)) {
+function fieldMaskToJson(fieldMask: FieldMask) {
+  return fieldMask.paths
+    .map((path) => {
+      if (path.match(/_[0-9]?_/g) || path.match(/[A-Z]/g)) {
         throw new Error(
-          `cannot encode message ${val.$typeName} to JSON: lowerCamelCase of path name "` +
-            p +
+          `cannot encode message ${fieldMask.$typeName} to JSON: lowerCamelCase of path name "` +
+            path +
             '" is irreversible',
         );
       }
-      return protoCamelCase(p);
+      return protoCamelCase(path);
     })
     .join(",");
 }
 
-function structToJson(val: Struct) {
+function structToJson(struct: Struct) {
   const json: JsonObject = {};
-  for (const [k, v] of Object.entries(val.fields)) {
-    json[k] = valueToJson(v);
+  for (const [key, value] of Object.entries(struct.fields)) {
+    json[key] = valueToJson(value);
   }
   return json;
 }
 
-function valueToJson(val: Value) {
-  switch (val.kind.case) {
+function valueToJson(value: Value) {
+  switch (value.kind.case) {
     case "nullValue":
       return null;
     case "numberValue":
-      if (!Number.isFinite(val.kind.value)) {
-        throw new Error(`${val.$typeName} cannot be NaN or Infinity`);
+      if (!Number.isFinite(value.kind.value)) {
+        throw new Error(`${value.$typeName} cannot be NaN or Infinity`);
       }
-      return val.kind.value;
+      return value.kind.value;
     case "boolValue":
-      return val.kind.value;
+      return value.kind.value;
     case "stringValue":
-      return val.kind.value;
+      return value.kind.value;
     case "structValue":
-      return structToJson(val.kind.value);
+      return structToJson(value.kind.value);
     case "listValue":
-      return listValueToJson(val.kind.value);
+      return listValueToJson(value.kind.value);
     default:
-      throw new Error(`${val.$typeName} must have a value`);
+      throw new Error(`${value.$typeName} must have a value`);
   }
 }
 
-function listValueToJson(val: ListValue): JsonValue[] {
-  return val.values.map(valueToJson);
+function listValueToJson(listValue: ListValue): JsonValue[] {
+  return listValue.values.map(valueToJson);
 }
 
-function timestampToJson(val: Timestamp) {
-  const ms = Number(val.seconds) * 1000;
+function timestampToJson(timestamp: Timestamp) {
+  const milliseconds = Number(timestamp.seconds) * 1000;
   if (
-    ms < Date.parse("0001-01-01T00:00:00Z") ||
-    ms > Date.parse("9999-12-31T23:59:59Z")
+    milliseconds < Date.parse("0001-01-01T00:00:00Z") ||
+    milliseconds > Date.parse("9999-12-31T23:59:59Z")
   ) {
     throw new Error(
-      `cannot encode message ${val.$typeName} to JSON: must be from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59Z inclusive`,
+      `cannot encode message ${timestamp.$typeName} to JSON: must be from 0001-01-01T00:00:00Z to 9999-12-31T23:59:59Z inclusive`,
     );
   }
-  if (val.nanos < 0) {
+  if (timestamp.nanos < 0) {
     throw new Error(
-      `cannot encode message ${val.$typeName} to JSON: nanos must not be negative`,
+      `cannot encode message ${timestamp.$typeName} to JSON: nanos must not be negative`,
     );
   }
-  if (val.nanos > 999999999) {
+  if (timestamp.nanos > 999999999) {
     throw new Error(
-      `cannot encode message ${val.$typeName} to JSON: nanos must not be greater than 99999999`,
+      `cannot encode message ${timestamp.$typeName} to JSON: nanos must not be greater than 99999999`,
     );
   }
-  let z = "Z";
-  if (val.nanos > 0) {
-    const nanosStr = (val.nanos + 1000000000).toString().substring(1);
+  let timezoneSuffix = "Z";
+  if (timestamp.nanos > 0) {
+    const nanosStr = (timestamp.nanos + 1000000000).toString().substring(1);
     if (nanosStr.substring(3) === "000000") {
-      z = "." + nanosStr.substring(0, 3) + "Z";
+      timezoneSuffix = "." + nanosStr.substring(0, 3) + "Z";
     } else if (nanosStr.substring(6) === "000") {
-      z = "." + nanosStr.substring(0, 6) + "Z";
+      timezoneSuffix = "." + nanosStr.substring(0, 6) + "Z";
     } else {
-      z = "." + nanosStr + "Z";
+      timezoneSuffix = "." + nanosStr + "Z";
     }
   }
-  return new Date(ms).toISOString().replace(".000Z", z);
+  return new Date(milliseconds).toISOString().replace(".000Z", timezoneSuffix);
 }
