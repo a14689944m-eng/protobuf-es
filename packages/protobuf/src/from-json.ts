@@ -194,57 +194,59 @@ export function isEnumJson<Desc extends DescEnum>(
 }
 
 function readMessage(
-  msg: ReflectMessage,
+  message: ReflectMessage,
   json: JsonValue,
-  opts: JsonReadOptions,
+  options: JsonReadOptions,
 ) {
-  if (tryWktFromJson(msg, json, opts)) {
+  if (tryWktFromJson(message, json, options)) {
     return;
   }
   if (json == null || Array.isArray(json) || typeof json != "object") {
-    throw new Error(`cannot decode ${msg.desc} from JSON: ${formatVal(json)}`);
+    throw new Error(
+      `cannot decode ${message.desc} from JSON: ${formatVal(json)}`,
+    );
   }
-  const oneofSeen = new Map<DescOneof, DescField>();
-  const jsonNames = new Map<string, DescField>();
-  for (const field of msg.desc.fields) {
-    jsonNames.set(field.name, field).set(field.jsonName, field);
+  const oneofFieldsSeen = new Map<DescOneof, DescField>();
+  const fieldsByJsonName = new Map<string, DescField>();
+  for (const field of message.desc.fields) {
+    fieldsByJsonName.set(field.name, field).set(field.jsonName, field);
   }
   for (const [jsonKey, jsonValue] of Object.entries(json)) {
-    const field = jsonNames.get(jsonKey);
+    const field = fieldsByJsonName.get(jsonKey);
     if (field) {
       if (field.oneof) {
         if (jsonValue === null && field.fieldKind == "scalar") {
           // see conformance test Required.Proto3.JsonInput.OneofFieldNull{First,Second}
           continue;
         }
-        const seen = oneofSeen.get(field.oneof);
-        if (seen !== undefined) {
+        const previouslySeenField = oneofFieldsSeen.get(field.oneof);
+        if (previouslySeenField !== undefined) {
           throw new FieldError(
             field.oneof,
-            `oneof set multiple times by ${seen.name} and ${field.name}`,
+            `oneof set multiple times by ${previouslySeenField.name} and ${field.name}`,
           );
         }
-        oneofSeen.set(field.oneof, field);
+        oneofFieldsSeen.set(field.oneof, field);
       }
-      readField(msg, field, jsonValue, opts);
+      readField(message, field, jsonValue, options);
     } else {
       let extension: DescExtension | undefined = undefined;
       if (
         jsonKey.startsWith("[") &&
         jsonKey.endsWith("]") &&
         // biome-ignore lint/suspicious/noAssignInExpressions: no
-        (extension = opts.registry?.getExtension(
+        (extension = options.registry?.getExtension(
           jsonKey.substring(1, jsonKey.length - 1),
         )) &&
-        extension.extendee.typeName === msg.desc.typeName
+        extension.extendee.typeName === message.desc.typeName
       ) {
         const [container, field, get] = createExtensionContainer(extension);
-        readField(container, field, jsonValue, opts);
-        setExtension(msg.message, extension, get());
+        readField(container, field, jsonValue, options);
+        setExtension(message.message, extension, get());
       }
-      if (!extension && !opts.ignoreUnknownFields) {
+      if (!extension && !options.ignoreUnknownFields) {
         throw new Error(
-          `cannot decode ${msg.desc} from JSON: key "${jsonKey}" is unknown`,
+          `cannot decode ${message.desc} from JSON: key "${jsonKey}" is unknown`,
         );
       }
     }
@@ -252,31 +254,35 @@ function readMessage(
 }
 
 function readField(
-  msg: ReflectMessage,
+  message: ReflectMessage,
   field: DescField,
   json: JsonValue,
-  opts: JsonReadOptions,
+  options: JsonReadOptions,
 ) {
   switch (field.fieldKind) {
     case "scalar":
-      readScalarField(msg, field, json);
+      readScalarField(message, field, json);
       break;
     case "enum":
-      readEnumField(msg, field, json, opts);
+      readEnumField(message, field, json, options);
       break;
     case "message":
-      readMessageField(msg, field, json, opts);
+      readMessageField(message, field, json, options);
       break;
     case "list":
-      readListField(msg.get(field), json, opts);
+      readListField(message.get(field), json, options);
       break;
     case "map":
-      readMapField(msg.get(field), json, opts);
+      readMapField(message.get(field), json, options);
       break;
   }
 }
 
-function readMapField(map: ReflectMap, json: JsonValue, opts: JsonReadOptions) {
+function readMapField(
+  map: ReflectMap,
+  json: JsonValue,
+  options: JsonReadOptions,
+) {
   if (json === null) {
     return;
   }
@@ -291,15 +297,15 @@ function readMapField(map: ReflectMap, json: JsonValue, opts: JsonReadOptions) {
     let value: unknown;
     switch (field.mapKind) {
       case "message":
-        const msgValue = reflect(field.message);
-        readMessage(msgValue, jsonMapValue, opts);
-        value = msgValue;
+        const messageValue = reflect(field.message);
+        readMessage(messageValue, jsonMapValue, options);
+        value = messageValue;
         break;
       case "enum":
         value = readEnum(
           field.enum,
           jsonMapValue,
-          opts.ignoreUnknownFields,
+          options.ignoreUnknownFields,
           true,
         );
         if (value === tokenIgnoredUnknownEnum) {
@@ -318,7 +324,7 @@ function readMapField(map: ReflectMap, json: JsonValue, opts: JsonReadOptions) {
 function readListField(
   list: ReflectList,
   json: JsonValue,
-  opts: JsonReadOptions,
+  options: JsonReadOptions,
 ) {
   if (json === null) {
     return;
@@ -333,15 +339,15 @@ function readListField(
     }
     switch (field.listKind) {
       case "message":
-        const msgValue = reflect(field.message);
-        readMessage(msgValue, jsonItem, opts);
-        list.add(msgValue);
+        const messageValue = reflect(field.message);
+        readMessage(messageValue, jsonItem, options);
+        list.add(messageValue);
         break;
       case "enum":
         const enumValue = readEnum(
           field.enum,
           jsonItem,
-          opts.ignoreUnknownFields,
+          options.ignoreUnknownFields,
           true,
         );
         if (enumValue !== tokenIgnoredUnknownEnum) {
@@ -356,72 +362,79 @@ function readListField(
 }
 
 function readMessageField(
-  msg: ReflectMessage,
+  message: ReflectMessage,
   field: DescField & { fieldKind: "message" },
   json: JsonValue,
-  opts: JsonReadOptions,
+  options: JsonReadOptions,
 ) {
   if (json === null && field.message.typeName != "google.protobuf.Value") {
-    msg.clear(field);
+    message.clear(field);
     return;
   }
-  const msgValue = msg.isSet(field) ? msg.get(field) : reflect(field.message);
-  readMessage(msgValue, json, opts);
-  msg.set(field, msgValue);
+  const messageValue = message.isSet(field)
+    ? message.get(field)
+    : reflect(field.message);
+  readMessage(messageValue, json, options);
+  message.set(field, messageValue);
 }
 
 function readEnumField(
-  msg: ReflectMessage,
+  message: ReflectMessage,
   field: DescField & { fieldKind: "enum" },
   json: JsonValue,
-  opts: JsonReadOptions,
+  options: JsonReadOptions,
 ) {
-  const enumValue = readEnum(field.enum, json, opts.ignoreUnknownFields, false);
+  const enumValue = readEnum(
+    field.enum,
+    json,
+    options.ignoreUnknownFields,
+    false,
+  );
   if (enumValue === tokenNull) {
-    msg.clear(field);
+    message.clear(field);
   } else if (enumValue !== tokenIgnoredUnknownEnum) {
-    msg.set(field, enumValue);
+    message.set(field, enumValue);
   }
 }
 
 function readScalarField(
-  msg: ReflectMessage,
+  message: ReflectMessage,
   field: DescField & { fieldKind: "scalar" },
   json: JsonValue,
 ) {
   const scalarValue = scalarFromJson(field, json, false);
   if (scalarValue === tokenNull) {
-    msg.clear(field);
+    message.clear(field);
   } else {
-    msg.set(field, scalarValue);
+    message.set(field, scalarValue);
   }
 }
 
 const tokenIgnoredUnknownEnum = Symbol();
 
 function readEnum(
-  desc: DescEnum,
+  enumDescriptor: DescEnum,
   json: JsonValue,
   ignoreUnknownFields: boolean,
   nullAsZeroValue: false,
 ): number | typeof tokenIgnoredUnknownEnum | typeof tokenNull;
 function readEnum(
-  desc: DescEnum,
+  enumDescriptor: DescEnum,
   json: JsonValue,
   ignoreUnknownFields: boolean,
   nullAsZeroValue: true,
 ): number | typeof tokenIgnoredUnknownEnum;
 function readEnum(
-  desc: DescEnum,
+  enumDescriptor: DescEnum,
   json: JsonValue,
   ignoreUnknownFields: boolean,
   nullAsZeroValue: boolean,
 ): number | typeof tokenNull | typeof tokenIgnoredUnknownEnum {
   if (json === null) {
-    if (desc.typeName == "google.protobuf.NullValue") {
+    if (enumDescriptor.typeName == "google.protobuf.NullValue") {
       return 0; // google.protobuf.NullValue.NULL_VALUE = 0
     }
-    return nullAsZeroValue ? desc.values[0].number : tokenNull;
+    return nullAsZeroValue ? enumDescriptor.values[0].number : tokenNull;
   }
   switch (typeof json) {
     case "number":
@@ -430,16 +443,20 @@ function readEnum(
       }
       break;
     case "string":
-      const value = desc.values.find((ev) => ev.name === json);
-      if (value !== undefined) {
-        return value.number;
+      const enumValueDescriptor = enumDescriptor.values.find(
+        (ev) => ev.name === json,
+      );
+      if (enumValueDescriptor !== undefined) {
+        return enumValueDescriptor.number;
       }
       if (ignoreUnknownFields) {
         return tokenIgnoredUnknownEnum;
       }
       break;
   }
-  throw new Error(`cannot decode ${desc} from JSON: ${formatVal(json)}`);
+  throw new Error(
+    `cannot decode ${enumDescriptor} from JSON: ${formatVal(json)}`,
+  );
 }
 
 const tokenNull = Symbol();
