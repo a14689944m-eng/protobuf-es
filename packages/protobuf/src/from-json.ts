@@ -54,6 +54,22 @@ import {
 } from "./wkt/index.js";
 import { createExtensionContainer, setExtension } from "./extensions.js";
 
+// Cache for JSON field name lookups per message descriptor
+const jsonNamesCache = new WeakMap<DescMessage, Map<string, DescField>>();
+
+function getJsonNames(desc: DescMessage): Map<string, DescField> {
+  let cached = jsonNamesCache.get(desc);
+  if (!cached) {
+    cached = new Map<string, DescField>();
+    for (const field of desc.fields) {
+      cached.set(field.name, field);
+      cached.set(field.jsonName, field);
+    }
+    jsonNamesCache.set(desc, cached);
+  }
+  return cached;
+}
+
 /**
  * Options for parsing JSON data.
  */
@@ -205,10 +221,7 @@ function readMessage(
     throw new Error(`cannot decode ${msg.desc} from JSON: ${formatVal(json)}`);
   }
   const oneofSeen = new Map<DescOneof, DescField>();
-  const jsonNames = new Map<string, DescField>();
-  for (const field of msg.desc.fields) {
-    jsonNames.set(field.name, field).set(field.jsonName, field);
-  }
+  const jsonNames = getJsonNames(msg.desc);
   for (const [jsonKey, jsonValue] of Object.entries(json)) {
     const field = jsonNames.get(jsonKey);
     if (field) {

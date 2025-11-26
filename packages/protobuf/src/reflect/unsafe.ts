@@ -22,6 +22,27 @@ const IMPLICIT: FeatureSet_FieldPresence.IMPLICIT = 2;
 
 export const unsafeLocal = Symbol.for("reflect unsafe local");
 
+// Cache for oneof field lookups by local name
+const oneofFieldsByLocalName = new WeakMap<
+  DescOneof,
+  Map<string, DescField>
+>();
+
+function getOneofFieldByLocalName(
+  oneof: DescOneof,
+  localName: string,
+): DescField | undefined {
+  let cached = oneofFieldsByLocalName.get(oneof);
+  if (!cached) {
+    cached = new Map<string, DescField>();
+    for (const field of oneof.fields) {
+      cached.set(field.localName, field);
+    }
+    oneofFieldsByLocalName.set(oneof, cached);
+  }
+  return cached.get(localName);
+}
+
 /**
  * Return the selected field of a oneof group.
  *
@@ -36,7 +57,7 @@ export function unsafeOneofCase(
   if (c === undefined) {
     return c;
   }
-  return oneof.fields.find((f) => f.localName === c);
+  return getOneofFieldByLocalName(oneof, c);
 }
 
 /**
